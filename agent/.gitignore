@@ -1,0 +1,86 @@
+# Dependencies
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+.pnpm-store/
+
+# Build output
+dist/
+build/
+.output/
+.nuxt/
+.next/
+out/
+.cache/
+coverage/
+
+# NestJS specific
+*.js.map
+*.d.ts
+
+# Quasar/Vue specific
+.quasar/
+quasar.config.*.temporary*
+/src-cordova/platforms
+/src-cordova/plugins
+/src-cordova/www
+/src-capacitor/www
+/src-capacitor/node_modules
+
+# Environment variables
+.env
+.env.*
+!.env.example
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDE and editor files
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+*.code-workspace
+*.sublime-workspace
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.DS_Store
+Thumbs.db
+
+# Testing
+/coverage
+.nyc_output
+
+# Temporary files
+.tmp/
+.temp/
+tmp/
+temp/
+
+# Generated files
+tsconfig.build.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Misc
+.history/
+.github/
