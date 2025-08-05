@@ -11,7 +11,10 @@ export default defineConfig((/* ctx */) => {
     // app boot file (/src/boot)
     // --> boot files are part of "main.js"
     // https://v2.quasar.dev/quasar-cli-vite/boot-files
-    boot: [],
+    boot: [
+      'pinia',
+      'router'
+    ],
 
     // https://v2.quasar.dev/quasar-cli-vite/quasar-config-file#css
     css: ['app.scss'],
@@ -52,7 +55,11 @@ export default defineConfig((/* ctx */) => {
 
       // publicPath: '/',
       // analyze: true,
-      // env: {},
+      env: {
+        API_URL: process.env.API_URL || 'http://localhost:3000',
+        VUE_ROUTER_MODE: process.env.VUE_ROUTER_MODE || 'hash',
+        VUE_ROUTER_BASE: process.env.VUE_ROUTER_BASE || '/'
+      },
       // rawDefine: {}
       // ignorePublicFolder: true,
       // minify: false,

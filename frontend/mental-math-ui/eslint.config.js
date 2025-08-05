@@ -26,7 +26,7 @@ export default defineConfigWithVueTs(
    *
    * pluginVue.configs.base
    *   -> Settings and rules to enable correct ESLint parsing.
-   * pluginVue.configs[ 'flat/essential']
+   * pluginVue.configs['flat/essential']
    *   -> base, plus rules to prevent errors or unintended behavior.
    * pluginVue.configs["flat/strongly-recommended"]
    *   -> Above, plus rules to considerably improve code readability and/or dev experience.
@@ -35,14 +35,22 @@ export default defineConfigWithVueTs(
    */
   pluginVue.configs['flat/essential'],
 
+  // https://github.com/vuejs/eslint-config-typescript
+  vueTsConfigs.recommendedTypeChecked,
+
   {
     files: ['**/*.ts', '**/*.vue'],
     rules: {
       '@typescript-eslint/consistent-type-imports': ['error', { prefer: 'type-imports' }],
+      '@typescript-eslint/no-unused-vars': ['off', { 
+        argsIgnorePattern: '.*',
+        varsIgnorePattern: '.*',
+        caughtErrorsIgnorePattern: '.*'
+      }],
+      '@typescript-eslint/prefer-promise-reject-errors': 'off', // Allow custom error objects in promises
+      '@typescript-eslint/no-explicit-any': 'off', // Disable no-explicit-any rule to allow usage of 'any' type
     },
   },
-  // https://github.com/vuejs/eslint-config-typescript
-  vueTsConfigs.recommendedTypeChecked,
 
   {
     languageOptions: {
