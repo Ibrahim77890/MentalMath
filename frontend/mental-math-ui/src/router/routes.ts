@@ -24,6 +24,16 @@ const routes: RouteRecordRaw[] = [
       { path: '', name: 'test', component: () => import('pages/TestPage.vue') }
     ]
   },
+  // Question/Quiz routes
+  {
+    path: '/practice',
+    component: () => import('layouts/QuestionLayout.vue'),
+    meta: { requiresAuth: true },
+    props: { totalQuestions: 10, timePerQuestion: 30 },
+    children: [
+      { path: '', name: 'practice', component: () => import('pages/QuestionPage.vue') }
+    ]
+  },
   {
     path: '/:catchAll(.*)*',
     component: () => import('pages/ErrorNotFound.vue')

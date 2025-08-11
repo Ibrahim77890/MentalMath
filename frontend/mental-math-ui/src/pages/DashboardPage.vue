@@ -2,19 +2,18 @@
   <q-page class="q-pa-md">
     <q-card flat bordered class="q-pa-lg">
       <div class="row items-center q-mb-md">
-        <q-select
-          v-model="selectedTopic"
-          :options="topicOptions"
-          label="Select Topic"
-          outlined
-          dense
-        />
-        <q-btn
-          class="q-ml-md"
-          label="Start Session"
-          color="primary"
-          @click="startSession"
-        />
+        <div class="q-mb-md">
+          <div class="text-subtitle1 q-mb-sm">Select Topic</div>
+          <div class="topic-list-container q-py-sm">
+            <div class="row no-wrap scroll">
+              <q-btn v-for="topic in topicOptions" :key="topic" :label="topic"
+                :color="selectedTopic === topic ? 'primary' : 'grey-3'"
+                :text-color="selectedTopic === topic ? 'white' : 'black'" @click="selectedTopic = topic" class="q-mx-xs"
+                padding="sm md" no-caps unelevated />
+            </div>
+          </div>
+        </div>
+        <q-btn class="q-ml-md" label="Start Session" color="primary" @click="startSession" />
       </div>
 
       <q-separator />
@@ -34,13 +33,8 @@
       <div class="q-mt-lg" v-if="recentSessions.length">
         <q-list bordered>
           <q-item-label header>Recent Sessions</q-item-label>
-          <q-item
-            v-for="session in recentSessions"
-            :key="session.id"
-            clickable
-            v-ripple
-            @click="viewSession(session.id)"
-          >
+          <q-item v-for="session in recentSessions" :key="session.id" clickable v-ripple
+            @click="viewSession(session.id)">
             <q-item-section>
               <div>{{ formatDate(session.startTime) }} - {{ session.topicOrder.join(', ') }}</div>
               <div class="text-caption">

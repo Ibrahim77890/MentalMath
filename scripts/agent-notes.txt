@@ -1,0 +1,444 @@
+Nice — I’ll give you a **complete `main.py`** (FastAPI) for an **Agent microservice** that implements the behaviours you described (adaptive questioning, strategy tips, metacognitive prompts, session summaries). The service is designed to be used as a separate microservice called by your NestJS backend (or directly by frontend in dev). It is **not** just a chatbot — it has rule-based decision logic, optional LLM calls for nicer text, and clear hooks so you can plug in `llama.cpp` (via `llama-cpp-python`) later.
+
+Below you’ll find:
+
+1. A runnable `main.py` (self-contained; uses in-memory store for demo).
+2. Explanation of each route / data model.
+3. How the agent decides (detailed rule logic).
+4. How to integrate with your backend (NestJS) and optional LLM usage.
+5. How to run & test.
+
+---
+
+## 0) Quick notes before the code
+
+* This file is a **starter** agent. In production you will:
+
+  * Persist sessions & feedback to your SQL DB (via the main backend).
+  * Replace in-memory storage with a database or cache.
+  * Secure the endpoints (API keys / mTLS).
+  * Provide a question-fetcher that queries your Mongo question bank or NestJS API.
+* LLM usage is **optional**. The code attempts to import `llama_cpp` and falls back to templates if unavailable.
+
+---
+
+## 1) `main.py`
+
+Save this file under `/agent/main.py`.
+
+```python
+# agent/main.py
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from typing import Optional, List, Dict, Any
+from datetime import datetime, timedelta
+import uuid
+import asyncio
+
+# Optional LLM (llama-cpp-python). If not installed, fall back to templates.
+try:
+    from llama_cpp import Llama
+    LLM_AVAILABLE = True
+    # update this path to your quantized gguf model
+    LLM_MODEL_PATH = "models/llama-3.2-3b-instruct.Q4_K_M.gguf"
+    llm = Llama(model_path=LLM_MODEL_PATH)
+except Exception:
+    LLM_AVAILABLE = False
+    llm = None
+
+app = FastAPI(title="MentalMath Agent")
+
+# ------------ Data models (Pydantic) ----------------
+class StartSessionRequest(BaseModel):
+    sessionId: Optional[str] = None
+    userId: Optional[str] = None
+    topicOrder: List[str]
+
+class StartSessionResponse(BaseModel):
+    sessionId: str
+    startedAt: datetime
+
+class AnswerEvent(BaseModel):
+    sessionId: str
+    questionId: str
+    topic: str
+    difficulty: int
+    wasCorrect: bool
+    timeTaken: float  # seconds
+    estimatedTime: Optional[float] = None  # seconds (from question metadata)
+    answer: Optional[str] = None
+
+class SuggestResponse(BaseModel):
+    nextQuestionId: Optional[str]
+    nextDifficulty: Optional[int]
+    strategyTip: str
+    message: str
+    reflectionPrompt: Optional[str]
+
+class EndSessionRequest(BaseModel):
+    sessionId: str
+
+class SessionSummary(BaseModel):
+    sessionId: str
+    startedAt: datetime
+    endedAt: datetime
+    perTopicStats: Dict[str, Dict[str, Any]]
+    overallAccuracy: float
+    recommendations: List[str]
+
+# -------------- In-memory store (demo only) ----------
+# session_store[sessionId] = { startedAt, topicOrder, events: [AnswerEvent...], stats... }
+session_store: Dict[str, Dict[str, Any]] = {}
+
+# A small mapping of strategy tips per topic. Extend / move to DB.
+STRATEGY_TIPS = {
+    "Arithmetic": [
+        "Use chunking: break big numbers into smaller chunks (e.g., 47×6 = 40×6 + 7×6).",
+        "Use complements for subtraction: 100 - 37 = 63 (think complements).",
+        "Use doubling/halving for multiplication with even factors."
+    ],
+    "Algebra": [
+        "Move constants to the other side first, then isolate the variable.",
+        "Try plugging small integers to check solutions quickly.",
+        "Simplify both sides by combining like terms before solving."
+    ],
+    "DiffEq": [
+        "Identify if this is separable or linear; separate variables if possible.",
+        "Try to find an integrating factor for first-order linear equations.",
+        "Check for special solutions like constants or simple polynomials first."
+    ],
+    "WordProblem": [
+        "Translate phrases to equations step-by-step; label unknowns explicitly.",
+        "Draw a quick diagram or timeline for motion/age problems.",
+        "Identify what is being asked: final value, rate, or total."
+    ]
+}
+
+# ------------ Helper functions ----------------------
+
+def now_utc():
+    return datetime.utcnow()
+
+def make_session_id() -> str:
+    return str(uuid.uuid4())
+
+def pick_strategy_tip(topic: str, was_correct: bool, timeTaken: float, estimated: Optional[float] = None) -> str:
+    # Use simple heuristics: if wrong -> give tip; if slow > estimated * 1.5 -> tip; else encouragement
+    tips = STRATEGY_TIPS.get(topic, ["Try a step-by-step approach."])
+    if not was_correct:
+        return tips[0]
+    if estimated and timeTaken > estimated * 1.5:
+        return tips[1] if len(tips) > 1 else tips[0]
+    return ""  # empty means no tip necessary
+
+async def call_llm_for_text(prompt: str, max_tokens: int = 80) -> str:
+    if not LLM_AVAILABLE or llm is None:
+        return ""
+    # simple sync call through python binding; in heavy usage make this threaded or run in process pool
+    try:
+        resp = llm(prompt, max_tokens=max_tokens)
+        # llama_cpp returns a dictionary with "choices" or "text" depending on version
+        text = getattr(resp, "text", None) or resp.get("text") or resp.get("choices", [{}])[0].get("text", "")
+        return (text or "").strip()
+    except Exception:
+        return ""
+
+async def generate_message_with_optional_llm(template_prompt: str, fallback: str) -> str:
+    # If an LLM is available, try to generate a nicer message. Otherwise return fallback.
+    if LLM_AVAILABLE:
+        llm_text = await call_llm_for_text(template_prompt)
+        if llm_text:
+            return llm_text
+    return fallback
+
+def compute_session_stats(events: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    per_topic: Dict[str, Dict[str, Any]] = {}
+    for e in events:
+        topic = e["topic"]
+        if topic not in per_topic:
+            per_topic[topic] = {"count": 0, "correct": 0, "total_time": 0.0}
+        per_topic[topic]["count"] += 1
+        per_topic[topic]["correct"] += 1 if e["wasCorrect"] else 0
+        per_topic[topic]["total_time"] += e["timeTaken"]
+    # finalize metrics
+    for topic, stats in per_topic.items():
+        stats["accuracy"] = round(100 * stats["correct"] / stats["count"], 2) if stats["count"] > 0 else 0.0
+        stats["avg_time"] = round(stats["total_time"] / stats["count"], 2) if stats["count"] > 0 else 0.0
+    return per_topic
+
+# A stub question fetcher:
+# In production, this should call the backend (NestJS) or query Mongo to find a question id by topic & difficulty.
+async def fetch_question_id_for_topic(topic: str, difficulty: int) -> Optional[str]:
+    # For demo: return a generated id; replace with HTTP request to backend questions service
+    return f"q-{topic[:3].lower()}-{difficulty}-{uuid.uuid4().hex[:6]}"
+
+# Decide next difficulty (basic rules)
+def decide_next_difficulty(current: int, was_correct: bool, timeTaken: float, estimated: Optional[float]) -> int:
+    if was_correct and (estimated is None or timeTaken <= max(estimated * 0.9, 1.0)):
+        # quick and correct: bump difficulty by 1 (cap at 5)
+        return min(current + 1, 5)
+    if not was_correct or (estimated and timeTaken > (estimated * 1.5)):
+        # struggle: reduce difficulty (min 1)
+        return max(current - 1, 1)
+    return current
+
+# -------------- Routes / APIs -----------------------
+
+@app.post("/session/start", response_model=StartSessionResponse)
+async def start_session(req: StartSessionRequest):
+    sid = req.sessionId or make_session_id()
+    started = now_utc()
+    session_store[sid] = {
+        "sessionId": sid,
+        "userId": req.userId,
+        "topicOrder": req.topicOrder,
+        "startedAt": started,
+        "events": [],
+        "stats": {},
+        "last_prompt_time": started
+    }
+    return StartSessionResponse(sessionId=sid, startedAt=started)
+
+@app.post("/agent/suggest-next", response_model=SuggestResponse)
+async def suggest_next(event: AnswerEvent):
+    # Validate session exists
+    if event.sessionId not in session_store:
+        raise HTTPException(status_code=404, detail="Session not found")
+    s = session_store[event.sessionId]
+
+    # record event
+    ev = {
+        "questionId": event.questionId,
+        "topic": event.topic,
+        "difficulty": event.difficulty,
+        "wasCorrect": event.wasCorrect,
+        "timeTaken": event.timeTaken,
+        "estimatedTime": event.estimatedTime,
+        "answer": event.answer,
+        "timestamp": now_utc().isoformat()
+    }
+    s["events"].append(ev)
+
+    # compute a strategy tip if needed
+    strategy_tip = pick_strategy_tip(event.topic, event.wasCorrect, event.timeTaken, event.estimatedTime)
+
+    # compute next difficulty
+    next_diff = decide_next_difficulty(event.difficulty, event.wasCorrect, event.timeTaken, event.estimatedTime)
+
+    # Example: if user failed, re-serve similar question or a simpler one
+    # fetch next question id (stub -> replace with real call)
+    next_qid = await fetch_question_id_for_topic(event.topic, next_diff)
+
+    # message generation (encouragement / reflection)
+    if not event.wasCorrect:
+        fallback_msg = f"Don't worry — you'll get it with practice. Try this tip: {strategy_tip}"
+        prompt = f"User failed a {event.topic} question. Suggest a short encouraging message and a short reflection prompt. Tip: {strategy_tip}"
+    else:
+        fallback_msg = "Nice work — keep going!"
+        prompt = f"User solved a {event.topic} question correctly in {event.timeTaken}s. Praise concisely and optionally suggest increasing difficulty."
+
+    message = await generate_message_with_optional_llm(prompt, fallback_msg)
+
+    reflection_prompt = "What method did you try?" if not event.wasCorrect else None
+
+    # Store agent feedback into session for later summary
+    feedback_entry = {
+        "timestamp": now_utc().isoformat(),
+        "message": message,
+        "type": "hint" if not event.wasCorrect else "encouragement",
+        "strategyTip": strategy_tip
+    }
+    s.setdefault("feedback", []).append(feedback_entry)
+
+    return SuggestResponse(
+        nextQuestionId=next_qid,
+        nextDifficulty=next_diff,
+        strategyTip=strategy_tip,
+        message=message,
+        reflectionPrompt=reflection_prompt
+    )
+
+@app.post("/session/end", response_model=SessionSummary)
+async def end_session(req: EndSessionRequest):
+    if req.sessionId not in session_store:
+        raise HTTPException(status_code=404, detail="Session not found")
+    s = session_store[req.sessionId]
+    endedAt = now_utc()
+    events = s.get("events", [])
+
+    per_topic = compute_session_stats(events)
+    total_questions = sum(v["count"] for v in per_topic.values()) if per_topic else 0
+    total_correct = sum(v["correct"] for v in per_topic.values()) if per_topic else 0
+    overall_accuracy = round(100 * total_correct / total_questions, 2) if total_questions else 0.0
+
+    # Create recommendations (simple heuristics)
+    recommendations = []
+    for topic, stats in per_topic.items():
+        if stats["accuracy"] < 70:
+            recommendations.append(f"Review basics of {topic} and try 10 easy questions.")
+        elif stats["accuracy"] < 90:
+            recommendations.append(f"Practice more problems in {topic} at current difficulty to improve speed.")
+        else:
+            recommendations.append(f"Try advanced questions in {topic} to challenge yourself.")
+
+    # Optionally, generate a nicer summary with LLM
+    prompt = f\"\"\"Session summary:
+sessionId: {req.sessionId}
+perTopic: {per_topic}
+overall accuracy: {overall_accuracy}
+Provide a concise friendly summary + 2 actionable recommendations.\"\"\"
+    llm_summary = await generate_message_with_optional_llm(prompt, "")
+
+    if llm_summary:
+        recommendations.insert(0, llm_summary)
+
+    # persist summary into session store (in real life -> write to SQL)
+    s["endedAt"] = endedAt
+    s["perTopicStats"] = per_topic
+    s["overallAccuracy"] = overall_accuracy
+    s["recommendations"] = recommendations
+
+    return SessionSummary(
+        sessionId=req.sessionId,
+        startedAt=s["startedAt"],
+        endedAt=endedAt,
+        perTopicStats=per_topic,
+        overallAccuracy=overall_accuracy,
+        recommendations=recommendations
+    )
+
+@app.get("/health")
+async def health():
+    return {"status": "ok", "llm_available": LLM_AVAILABLE}
+```
+
+---
+
+## 2) Route / model summary
+
+* `POST /session/start` — create session, returns `sessionId`. (Called when user begins 1-hour session.)
+* `POST /agent/suggest-next` — **main endpoint**. Called after each answered question; receives answer event and returns:
+
+  * `nextQuestionId` (agent’s selection for next question)
+  * `nextDifficulty` (numeric suggestion)
+  * `strategyTip` (short tip)
+  * `message` (encouragement or guidance; optionally LLM-generated)
+  * `reflectionPrompt` (optional metacognitive prompt)
+* `POST /session/end` — compute session summary, per-topic stats, recommendations; returns `SessionSummary`.
+* `GET /health` — simple health check.
+
+---
+
+## 3) How agent backend serves tasks & integration pattern
+
+Typical flow in your full system:
+
+1. **Frontend** (Quasar) sends user answer to **NestJS backend** (or directly to agent in dev).
+2. **NestJS** saves `QuestionSession` into SQL (immediate persistence). Then it calls agent microservice `POST /agent/suggest-next` with the answer event (sessionId, questionId, topic, wasCorrect, timeTaken, estimatedTime).
+
+   * Or you can call agent first and then persist both the user's answer and agent feedback together; whichever fits ACID needs.
+3. **Agent**:
+
+   * Records the event (in-memory or DB).
+   * Applies rule-based logic to decide next difficulty and whether a strategy tip is needed.
+   * Optionally invokes the local LLM (llama.cpp) to generate natural language messages (encouragement, reflection prompts, or a nice summary).
+   * Returns suggestion payload to NestJS.
+4. **NestJS** persists agent feedback (`FeedbackEntry`) along with `QuestionSession`.
+5. **Frontend** receives `nextQuestionId` and agent messages and shows them to user. If `nextQuestionId` is a token, the frontend (or NestJS) requests the actual question content from the Questions service (Mongo) and displays it.
+
+---
+
+## 4) How the AI Agent "decides" (not just a chatbot)
+
+* **Rule-based core** is the backbone for fast, deterministic behavior:
+
+  * `decide_next_difficulty()` uses simple time + correctness thresholds to raise/lower difficulty.
+  * `pick_strategy_tip()` selects targeted technique based on topic + failure/latency heuristics.
+* **LLM (optional)** is used as a *language generator* only:
+
+  * It generates *polished* messages, summaries, or prompts. It does **not** decide core numeric/difficulty rules (rules remain deterministic).
+  * This separation keeps behavior explainable while still getting friendly language from the model.
+* **Metacognitive prompts** are issued when events indicate confusion (wrong answer or slow time).
+* **Session summary** is computed from recorded events (counts, accuracy, avg time) and converted into recommendations by heuristics. LLM can improve phrasing.
+
+This design ensures:
+
+* **Fast responses** (rules => deterministic, low latency).
+* **Human-friendly text** (LLM only for wording).
+* **Controllability** (you can change thresholds/strategies without retraining a model).
+* **Safety & privacy** (if you run LLM locally via `llama.cpp`, data stays on your machine).
+
+---
+
+## 5) Running & testing
+
+1. Ensure Python venv and deps:
+
+```bash
+cd agent
+python -m venv venv
+# Windows (PowerShell)
+.\venv\Scripts\Activate.ps1
+# or cmd
+venv\Scripts\activate
+pip install fastapi uvicorn pydantic
+# optionally: pip install llama-cpp-python (if you want local LLM)
+```
+
+2. Run:
+
+```bash
+uvicorn main:app --host 0.0.0.0 --port 8001 --reload
+```
+
+3. Test with `curl`:
+
+* Start session:
+
+```bash
+curl -X POST "http://localhost:8001/session/start" -H "Content-Type: application/json" -d '{"userId":"u1","topicOrder":["Arithmetic","Algebra"]}'
+```
+
+* Send answer event:
+
+```bash
+curl -X POST "http://localhost:8001/agent/suggest-next" -H "Content-Type: application/json" -d '{
+  "sessionId":"<sessionIdFromStart>",
+  "questionId":"q-1",
+  "topic":"Arithmetic",
+  "difficulty":2,
+  "wasCorrect":false,
+  "timeTaken":45,
+  "estimatedTime":30,
+  "answer":"48"
+}'
+```
+
+* End session:
+
+```bash
+curl -X POST "http://localhost:8001/session/end" -H "Content-Type: application/json" -d '{"sessionId":"<sessionId>"}'
+```
+
+---
+
+## 6) Production & improvement suggestions
+
+* **Persistence**: write session events + feedback into your main SQL DB (or agent DB) so you can compute historical improvement.
+* **Asynchronous processing**: for LLM calls, consider background tasks or a work queue (RabbitMQ/Kafka) to avoid blocking the request pipeline.
+* **gRPC option**: use gRPC when you need low-latency binary RPC between NestJS and agent; HTTP/JSON is easier to debug.
+* **Observability**: add metrics (Prometheus) and request tracing (OpenTelemetry).
+* **Security**: require an API key or mTLS between NestJS and agent.
+* **A/B testing**: experiment with different thresholds/strategy tips to find what improves learning best.
+* **Model usage**: keep the decision logic rule-based, and use local LLM only for text generation. If you need higher reasoning for math steps, implement a math-checker (deterministic verification) instead of relying on LLM correctness.
+
+---
+
+If you want I can:
+
+* Plug this agent into your NestJS code with an example HTTP client call.
+* Add persistence hooks (example code using SQL/Mongo) to replace the in-memory session store.
+* Provide an alternative version that uses gRPC instead of HTTP.
+* Add a `Dockerfile` for the agent.
+
+Which one would you like next?

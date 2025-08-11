@@ -4,6 +4,11 @@
       <div class="auth-container">
         <q-card class="auth-card">
 
+          <q-card-section class="auth-card-header">
+            <h1 class="text-h5 q-my-none">{{ title }}</h1>
+            <p v-if="subtitle" class="text-body2 q-mt-sm q-mb-none text-grey-7">{{ subtitle }}</p>
+          </q-card-section>
+
           <div class="auth-card-content">
             <!-- Use either slot or router-view, not both -->
             <slot>

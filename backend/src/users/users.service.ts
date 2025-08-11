@@ -77,7 +77,11 @@ export class UsersService {
     }
 
     // Generate JWT token
-    const payload = { email: user.email, sub: user.id };
+    const payload = {
+      email: user.email,
+      sub: user.id,
+      role: user.role, // Include role in JWT payload
+    };
 
     return {
       accessToken: this.jwtService.sign(payload),
@@ -85,6 +89,7 @@ export class UsersService {
         id: user.id,
         email: user.email,
         fullName: user.fullName,
+        role: user.role, // Include role in response
       },
     };
   }

@@ -25,6 +25,15 @@ export class Question {
   @Prop()
   strategyTip: string;
 
+  @Prop({ type: String, required: true })
+  addedById: string;
+
+  @Prop({ type: String, required: false })
+  addedByName: string;
+
+  @Prop({ type: String, required: false })
+  lastModifiedById: string;
+
   @Prop({ type: [String], default: [] })
   tags: string[];
 

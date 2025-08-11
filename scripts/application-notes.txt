@@ -1,0 +1,437 @@
+Great — here’s a complete, practical blueprint for how **the MentalMath app** should be built for a solid POC, showing exactly **how the NestJS backend and the Agent (FastAPI) service work together**, all the **scenarios** you must implement, the **APIs** (request/response shape), the **data model** split between SQL and MongoDB, operational concerns (auth, retries, LLM fallbacks), and suggested dev/testing flows.
+
+I’ll break this into sections so you can copy/paste and implement step-by-step.
+
+---
+
+# 1. High-level architecture (POC)
+
+* **Frontend (Quasar)** — user UI (topic selection, session, questions, dashboard). Talks to NestJS.
+* **Backend (NestJS + TypeORM + Mongoose)** — core business logic, auth, persistence:
+
+  * SQL (Postgres) for transactional data: `Users`, `Sessions`, `QuestionSessions`, `Feedback`.
+  * MongoDB for flexible content: `Questions`.
+* **Agent microservice (FastAPI)** — adaptive logic + optional LLM usage. Exposes REST endpoints (`/agent/suggest-next`, `/session/start`, `/session/end`, `/health`) that NestJS calls.
+* **Optional LLM server** (local `llama.cpp` wrapper or hosted) — agent will call it to produce polished messages. Agent falls back to rule-based responses if no LLM.
+* **Communication**: Start with **HTTP/REST** (easy to debug). Consider gRPC later for lower latency between services.
+
+Ports/examples:
+
+* NestJS: `http://localhost:3000` (main API)
+* Agent: `http://localhost:8001` (agent API)
+* LLM server (if separate): `http://localhost:9000`
+
+---
+
+# 2. Primary scenarios to implement (and why)
+
+These are the user journeys & internal flows you must code for the POC.
+
+1. **User registration / login** (Auth flow).
+2. **Topic selection** (user chooses topics for session).
+3. **Start a session** (session record created, ordered topics saved).
+4. **Serve first question** (frontend requests a question; backend fetches from Mongo based on topic + difficulty).
+5. **Submit answer** (frontend -> NestJS): NestJS persists answer (QuestionSession), then calls Agent `/agent/suggest-next` to get nextQuestionId, nextDifficulty, tips and messages.
+6. **Agent response processing**: NestJS stores agent feedback in SQL (`Feedback`) and returns combined payload to frontend.
+7. **Repeat question loop** until session end or one-hour limit.
+8. **End session**: frontend asks NestJS to end session; NestJS calls Agent `/session/end` (or computes summary itself); persist summary and compute dashboard statistics.
+9. **Admin content management**: CRUD for `Question` (Mongo).
+10. **Dashboard & analytics**: endpoints for aggregated user stats (NestJS queries SQL + occasionally joins to retrieve question metadata from Mongo).
+11. **Agent health & fallback**: check `/health` from Agent and optional LLM server; fallback to local rule-based behavior if unreachable.
+
+---
+
+# 3. Minimal API list (POC) — what to implement first
+
+### NestJS (main backend)
+
+Auth:
+
+* `POST /auth/register` → `{name,email,password}` → returns `{userId, token}`
+* `POST /auth/login` → `{email,password}` → returns `{accessToken, refreshToken?}`
+
+Session & flow:
+
+* `POST /sessions/start`
+  Request:
+
+  ```json
+  { "userId": "u1", "topicOrder":["Arithmetic","Algebra"], "sessionId?": "<opt>" }
+  ```
+
+  Response:
+
+  ```json
+  { "sessionId":"<sid>", "startedAt":"ISO_DATETIME" }
+  ```
+* `GET /questions/next?topic=Algebra&difficulty=2`
+  Response:
+
+  ```json
+  { "questionId":"q-123", "text":"Solve 2x+5=17", "options":null, "estimatedTime":45, "difficulty":2, "topic":"Algebra" }
+  ```
+* `POST /answers` (frontend submits answer; NestJS persists and calls Agent)
+  Request:
+
+  ```json
+  {
+    "sessionId":"<sid>",
+    "questionId":"q-123",
+    "topic":"Algebra",
+    "difficulty":2,
+    "answer":"6",
+    "wasCorrect":true,
+    "timeTaken":34
+  }
+  ```
+
+  Response (combined from DB + Agent):
+
+  ```json
+  {
+    "ok": true,
+    "agent": {
+      "nextQuestionId":"q-456",
+      "nextDifficulty":3,
+      "strategyTip":"...",
+      "message":"Great job!",
+      "reflectionPrompt": null
+    },
+    "saved": { "questionSessionId":"qs-1" }
+  }
+  ```
+* `POST /sessions/end`
+  Request: `{ "sessionId": "<sid>" }`
+  Response: session summary object (per-topic stats, overall accuracy, recommendations)
+* `GET /dashboard?userId=u1&topic=Algebra`
+  Response: stats & chart data for frontend.
+
+Admin (CRUD):
+
+* `POST /admin/questions` — create question (stored in Mongo).
+* `PUT /admin/questions/:id` — update
+* `DELETE /admin/questions/:id`
+* `GET /admin/questions?topic=Arithmetic&difficulty=2` — search
+
+Health:
+
+* `GET /health` — returns service status
+
+### Agent (FastAPI)
+
+Design agent as an independent service. Minimal endpoints:
+
+* `GET /health` → `{status:"ok", llm_available:true|false}`
+* `POST /session/start` — create agent-side session context (optional; Nest can call it on session start)
+
+  * Request: `{sessionId, userId, topicOrder}`
+  * Response: `{sessionId, startedAt}`
+* `POST /agent/suggest-next` — main endpoint:
+  Request:
+
+  ```json
+  {
+    "sessionId":"sid",
+    "questionId":"q-123",
+    "topic":"Algebra",
+    "difficulty":2,
+    "wasCorrect": false,
+    "timeTaken": 50,
+    "estimatedTime": 40,
+    "answer":"5"
+  }
+  ```
+
+  Response:
+
+  ```json
+  {
+    "nextQuestionId":"q-456",
+    "nextDifficulty":2,
+    "strategyTip":"Use chunking...",
+    "message":"Try breaking the problem...",
+    "reflectionPrompt":"What method did you try?"
+  }
+  ```
+* `POST /session/end` — agent returns summary & recommendations (NestJS may call it)
+  Request: `{sessionId}`
+  Response: `{perTopicStats:{...}, overallAccuracy:88.2, recommendations:[...]}`
+* (Optional) `POST /agent/generate-text` — proxy to local/external LLM for Nicetext.
+
+---
+
+# 4. DB design — hybrid (SQL + Mongo) — exact tables/collections
+
+### SQL (Postgres via TypeORM) — transactional
+
+**Users**
+
+```sql
+id uuid PK
+name text
+email text unique
+password_hash text
+selected_topics jsonb  -- user's default topic list
+created_at timestamp
+updated_at timestamp
+```
+
+**Sessions**
+
+```sql
+id uuid PK
+user_id uuid FK -> users.id
+topic_order jsonb   -- ordered array of topics
+started_at timestamp
+ended_at timestamp  -- nullable until end
+notes text
+```
+
+**QuestionSessions** (answers recorded during session)
+
+```sql
+id uuid PK
+session_id uuid FK -> sessions.id
+question_id text    -- maps to Mongo Question _id (string)
+topic text
+difficulty int
+response text
+was_correct boolean
+time_taken int
+timestamp timestamp
+```
+
+**FeedbackEntries** (agent messages saved per session)
+
+```sql
+id uuid PK
+session_id uuid FK
+timestamp timestamp
+type text   -- hint|encouragement|summary
+message text
+strategy_tip text
+meta jsonb (optional)
+```
+
+**(Optional) Admin / Audit tables**
+
+* `QuestionEdits`, `UserEvents` for moderation & rollback
+
+**Indexes** to add:
+
+* `sessions(user_id, started_at)`
+* `question_sessions(session_id)` and `question_sessions(question_id)`
+* `users(email) unique`
+
+---
+
+### MongoDB (via Mongoose) — flexible content
+
+**Question** collection (documents)
+
+```json
+{
+  "_id": "q-123",
+  "text": "Solve 2x + 5 = 17",
+  "topic": "Algebra",
+  "difficulty": 2,
+  "options": null,
+  "correctAnswer": "6",
+  "strategyTip": "Subtract 5 then divide by 2",
+  "estimatedTime": 45,
+  "tags": ["linear", "equation", "intro"],
+  "createdAt": ISODate(...),
+  "updatedAt": ISODate(...)
+}
+```
+
+Indexes:
+
+* `{ topic:1, difficulty:1 }`
+* `{ tags:1 }`
+* text index on `text` for search
+
+---
+
+# 5. End-to-end flows & step-by-step sequences
+
+I’ll show three common flows: session start, question-answer loop, session end.
+
+### Flow A — Start Session
+
+1. Frontend calls `POST /sessions/start` with user & chosen topicOrder.
+2. NestJS:
+
+   * Creates `Session` record in Postgres (started\_at).
+   * Optionally call `POST /agent/session/start` to let agent create context.
+   * Return `sessionId` to frontend.
+3. Frontend requests first question:
+
+   * `GET /questions/next?topic=topicOrder[0]&difficulty=startingDifficulty` (e.g., 1)
+   * NestJS queries Mongo to return full question content.
+
+### Flow B — Answer -> Agent Suggestion -> Next Question
+
+1. User answers a question; frontend sends `POST /answers` to NestJS with response, timeTaken, correctness.
+2. NestJS:
+
+   * Persists `QuestionSession` immediately (write to Postgres).
+   * Calls Agent `POST /agent/suggest-next` with event payload (sessionId, questionId, wasCorrect, timeTaken, estimatedTime).
+3. Agent:
+
+   * Appends event to its session memory (in-memory or DB).
+   * Applies deterministic rules:
+
+     * If correct and fast → increase difficulty.
+     * If incorrect or slow → decrease difficulty and pick a strategy tip.
+   * Optionally calls LLM for friendly text: `call_llm_for_text()` (remote or local).
+   * Selects `nextQuestionId` by calling NestJS Questions API or returns criteria (topic + difficulty) for NestJS to fetch actual question.
+   * Returns suggestion payload.
+4. NestJS:
+
+   * Stores agent feedback in `FeedbackEntries`.
+   * If agent returned `nextQuestionId` (preferable), fetch question from Mongo and return the question + agent message to frontend.
+   * If agent returned only `topic+difficulty`, call questions service to fetch a question id and content.
+5. Frontend displays next question and agent hints.
+
+### Flow C — End Session Summary
+
+1. Frontend calls `POST /sessions/end`.
+2. NestJS:
+
+   * Marks session ended (updates `ended_at`).
+   * Aggregates `QuestionSession` for that `sessionId` (per-topic accuracy, avgTime).
+   * Calls Agent `POST /session/end` with sessionId (Agent may recompute using its in-memory events or you pass the aggregated events).
+3. Agent:
+
+   * Computes per-topic stats and recommendations (rule-based).
+   * Optionally uses LLM to generate a friendly summary.
+   * Returns SessionSummary.
+4. NestJS persists any additional feedback entries and returns SessionSummary to frontend.
+
+---
+
+# 6. Important edge cases & scenarios to code for
+
+* **Agent/server unreachable**: NestJS should still persist answers and fallback to local rule logic (or a non-LLM version). Return friendly fallback to frontend: `agent: { message: "Agent temporarily offline, continuing with simple rules" }`.
+* **Question exhaustion**: If no matching question in Mongo, agent/Nest should (a) downgrade difficulty, (b) pick next topic, or (c) return a placeholder/exercise generator.
+* **Race conditions**: Ensure single session update is safe when parallel requests happen — use DB transactions for critical updates (e.g., finalizing session).
+* **Incorrect client timestamps**: Use server timestamps for events, not client-supplied ones (but accept client timeTaken).
+* **User disconnect / resume**: Allow sessions to be resumed — store session state server-side.
+* **LLM latency**: call LLM asynchronously (non-blocking) or set max timeout; provide immediate rule-based fallback if LLM times out.
+* **Security**: validate all inputs; protect agent endpoints with an internal API key or mTLS (agent should not be publicly callable).
+* **Rate limiting**: Prevent abusive clients (too many calls per second).
+
+---
+
+# 7. Implementation priority for POC (concrete checklist)
+
+**Phase 1 (MVP)** — Must-have:
+
+* [ ] Auth endpoints (register/login)
+* [ ] Start session, end session endpoints (NestJS)
+* [ ] Questions CRUD (Mongo) and `GET /questions/next`
+* [ ] `POST /answers` that persists answers
+* [ ] Agent FastAPI with `/agent/suggest-next` (rule-based only; no LLM)
+* [ ] Integration: NestJS calls Agent after persisting answers
+* [ ] Simple Dashboard endpoint (`GET /dashboard`) for basic aggregations
+* [ ] Frontend flows: topic selection → session → Q/A loop → end & summary
+
+**Phase 2 (Enhanced POC)** — Nice-to-have:
+
+* [ ] LLM integration in agent (local llama.cpp or external server)
+* [ ] Agent session-store persistence (so agent can recompute after restart)
+* [ ] Admin UI for questions
+* [ ] Caching of frequently fetched questions
+* [ ] Health check endpoints & basic monitoring
+
+**Phase 3 (Productionish)**:
+
+* [ ] Authentication/authorization between NestJS and Agent (API key)
+* [ ] Queue for LLM-heavy jobs (Celery/RabbitMQ or Redis+Bull)
+* [ ] Observability (metrics, traces)
+* [ ] Tests (unit + integration)
+
+---
+
+# 8. Concrete API examples (copy/paste ready)
+
+**NestJS** controller routes (signatures):
+
+```ts
+POST /auth/register
+POST /auth/login
+POST /sessions/start
+GET  /questions/next?topic=Arithmetic&difficulty=2
+POST /answers      // body includes sessionId, questionId, answer, timeTaken, wasCorrect
+POST /sessions/end
+GET  /dashboard?userId=...&topic=...
+POST /admin/questions  // body -> create in Mongo
+```
+
+**Agent (FastAPI)**:
+
+```py
+GET /health
+POST /session/start
+POST /agent/suggest-next
+POST /session/end
+POST /agent/generate-text   # optional: proxy/generation endpoint
+```
+
+---
+
+# 9. Security & operational details
+
+* **Auth**:
+
+  * Use JWTs for frontend ↔ NestJS.
+  * Mutual auth/API keys for NestJS ↔ Agent, or keep Agent in private network.
+* **Timeouts**:
+
+  * Agent call from NestJS: 2–5s default; fallback rules if timeout.
+  * LLM calls: configure 10–30s but consider async processing.
+* **Logging**: persist `FeedbackEntries`, agent decisions for audit and A/B testing.
+* **Storage**: backup Postgres and Mongo regularly, use free-tier providers for POC (Railway, Neon, Mongo Atlas).
+* **Local dev**: use Docker Compose to spin Postgres + Mongo + NestJS + Agent.
+
+---
+
+# 10. Monitoring & testing
+
+* **Health endpoints** for each service.
+* **Unit tests** for agent decision logic (edge cases on thresholds).
+* **Integration tests**: simulate session flow (start → Q/A loop → end).
+* **Postman** collection for all APIs (include a script saving `accessToken` to env).
+
+---
+
+# 11. Example session data flow (concise step-by-step — copy into your controllers)
+
+1. Frontend: `POST /sessions/start` → NestJS creates session and returns `sid`.
+2. Frontend: `GET /questions/next?topic=A&difficulty=1` → NestJS -> Mongo -> returns question object.
+3. Frontend: user answers → `POST /answers` → NestJS persists `QuestionSession`, calls Agent `POST /agent/suggest-next`.
+4. Agent responds with criteria or `nextQuestionId` + text.
+5. NestJS persists `FeedbackEntry`, fetches next question, returns to frontend.
+6. Repeat until `POST /sessions/end` called → NestJS aggregates and optionally calls Agent `/session/end` to get friendly summary → returns summary.
+
+---
+
+# 12. Final notes & recommended tech stack recap
+
+* **Backend**: NestJS + TypeORM (Postgres) + Mongoose (Mongo)
+* **Agent**: FastAPI — rule-based core + optional LLM (local llama.cpp or external)
+* **Frontend**: Quasar (Vue) — PWA, Electron/Capacitor
+* **Comm**: REST for MVP; gRPC later if needed
+* **DB**: Hybrid — Postgres for sessions & audits; Mongo for question bank
+* **Dev ops**: Docker Compose for local POC; containerize services for deployment
+
+---
+
+If you want, I can next:
+
+* Provide exact TypeORM entity classes and Mongoose schemas for the models described.
+* Provide example NestJS controller code for `POST /answers` showing how to call the Agent endpoint and persist `FeedbackEntry`.
+* Provide a Docker Compose file that wires Postgres, Mongo, NestJS, and Agent for local testing.
+
+Which of those would help you implement the POC fastest?
