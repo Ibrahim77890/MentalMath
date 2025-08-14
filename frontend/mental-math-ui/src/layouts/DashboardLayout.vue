@@ -33,7 +33,7 @@
       </q-toolbar>
     </q-header>
 
-    <!-- Navigation Drawer -->
+    <!-- Navigation Drawer
     <q-drawer show-if-above v-model="drawer" side="left" bordered>
       <q-list padding>
         <q-item clickable v-ripple @click="navigate('/')">
@@ -43,7 +43,7 @@
           <q-item-section>Analytics</q-item-section>
         </q-item>
       </q-list>
-    </q-drawer>
+    </q-drawer> -->
 
     <!-- Main Content -->
     <q-page-container>

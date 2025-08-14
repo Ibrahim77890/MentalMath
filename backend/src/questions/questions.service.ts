@@ -12,16 +12,16 @@ export class QuestionsService {
   ) {}
 
   async create(
-    createQuestionDto: CreateQuestionDto,
+    createQuestionDto: CreateQuestionDto[],
     userId: string,
     userName?: string,
   ) {
-    const newQuestion = new this.questionModel({
-      ...createQuestionDto,
+    const questionsToInsert = createQuestionDto.map((dto) => ({
+      ...dto,
       addedById: userId,
       addedByName: userName || 'Unknown',
-    });
-    return await newQuestion.save();
+    }));
+    return await this.questionModel.insertMany(questionsToInsert);
   }
 
   async findAll(topic?: string, difficulty?: number) {

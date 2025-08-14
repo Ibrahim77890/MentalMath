@@ -1,6 +1,6 @@
 import { IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 
-enum QuestionTopic {
+export enum QuestionTopic {
   ARITHMETIC = 'Arithmetic',
   ALGEBRA = 'Algebra',
   DIFFERENTIAL_EQUATIONS = 'DifferentialEquations',

@@ -24,6 +24,13 @@ const routes: RouteRecordRaw[] = [
       { path: '', name: 'test', component: () => import('pages/TestPage.vue') }
     ]
   },
+  {
+    path: '/landing',
+    component: () => import('layouts/LandingLayout.vue'),
+    children: [
+      { path: '', name: 'landing', component: () => import('pages/LandingPage.vue') }
+    ]
+  },
   // Question/Quiz routes
   {
     path: '/practice',
@@ -32,6 +39,15 @@ const routes: RouteRecordRaw[] = [
     props: { totalQuestions: 10, timePerQuestion: 30 },
     children: [
       { path: '', name: 'practice', component: () => import('pages/QuestionPage.vue') }
+    ]
+  },
+  {
+    path: '/session',
+    component: () => import('layouts/SessionLayout.vue'),
+    meta: { requiresAuth: true },
+    props: { totalQuestions: 10, timePerQuestion: 30 },
+    children: [
+      { path: '', name: 'practice', component: () => import('pages/SessionPage.vue') }
     ]
   },
   {

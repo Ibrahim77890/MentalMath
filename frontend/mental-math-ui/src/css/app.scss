@@ -1,1 +1,130 @@
+.landing-bg {
+  background: url('/wallpaper-landing-page (2).jpg') center center / cover no-repeat;
+  position: relative;
+  min-height: 60vh;
+  margin: 0;
+  padding: 0;
+  /* Ensure children are above overlay */
+  > * {
+    position: relative;
+    z-index: 1;
+  }
+}
+
+.landing-bg::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.1; /* your desired overlay opacity */
+  background: #000; /* pure black overlay */
+  z-index: 0;
+  pointer-events: none;
+}
+
+
+.q-layout {
+    background: #020202;
+    color: aliceblue;
+    font-family: "Nata Sans", sans-serif;
+    padding: 0;
+}
+
+.q-card {
+  background: #020202;
+}
+
+.how-it-works .q-card, .features .q-card, .benefits .q-card, .sample-stats .q-card, .faq .q-card {
+    background: #020202;
+    color: aliceblue;
+    font-family: "Nata Sans", sans-serif;
+}
+
+.how-it-works {
+    min-height: 80vh;
+}
+
+.features .q-card {
+    background: #121212;
+    color: aliceblue;
+    font-family: "Nata Sans", sans-serif;
+}
+
+.nata-sans {
+  font-family: "Nata Sans", sans-serif;
+  font-optical-sizing: auto;
+  font-weight: 500;
+  font-style: normal;
+}
+
+.q-header {
+    background: #020202;
+}
+
 // app global css in SCSS form
+.mentalmath-logo {
+  font-size: 4rem;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  /* Gradient fill */
+  background: linear-gradient(to right, #313df1 0%, #ef2a27 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  /* Outline with dark gradient */
+  -webkit-text-stroke: 0px;
+  -webkit-text-stroke-color: #2d1e4f;
+  /* Responsive */
+  margin-bottom: 1.5rem;
+  text-align: left;
+  /* Optional: make it even larger on big screens */
+  @media (min-width: 900px) {
+    font-size: 5.5rem;
+  }
+}
+
+.typewriter-cursor {
+  display: inline-block;
+  width: 1ch;
+  animation: blink 1s steps(1) infinite;
+}
+
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+.nav-btn {
+  margin-left: 12px; /* space between buttons */
+  margin-right: 12px;
+  transition: opacity 0.2s ease;
+}
+
+.nav-btn:hover {
+  opacity: 0.7; /* dim on hover */
+}
+
+.fade-slide-enter-from,
+.fade-slide-leave-to {
+  opacity: 0;
+  transform: translateY(8px) scale(0.99);
+}
+.fade-slide-enter-to,
+.fade-slide-leave-from {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+.fade-slide-enter-active,
+.fade-slide-leave-active {
+  transition: opacity 420ms ease, transform 420ms cubic-bezier(.2,.8,.2,1);
+}
+
+/* small spacing adjustment for the transition-group wrapper so timeline layout stays consistent */
+.q-timeline > div {
+  display: contents; /* keep q-timeline-entry direct in DOM for Quasar */
+}
+
+/* optional styling for timeline entries */
+.timeline-entry {
+  will-change: opacity, transform;
+}
