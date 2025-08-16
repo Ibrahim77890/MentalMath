@@ -50,11 +50,6 @@ export class QuestionsController {
     return this.questionsService.findAll(topic, difficulty);
   }
 
-  @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.questionsService.findOne(id);
-  }
-
   @MinimumRole(UserRole.TEACHER)
   @Patch(':id')
   update(
@@ -123,5 +118,10 @@ export class QuestionsController {
   @Delete('topics/:id')
   async removeTopic(@Param('id') id: string): Promise<any> {
     return this.topicsService.remove(id);
+  }
+
+  @Get(':id')
+  findOne(@Param('id') id: string) {
+    return this.questionsService.findOne(id);
   }
 }

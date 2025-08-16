@@ -17,7 +17,7 @@ export class QuestionSession {
   @JoinColumn()
   session: Session;
 
-  @Column('text') // Changed from uuid to text for MongoDB ObjectId
+  @Column('text')
   questionId: string; // references external Mongo Question
 
   @Column('text')
@@ -31,4 +31,19 @@ export class QuestionSession {
 
   @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   timestamp: Date;
+
+  @Column('int', { nullable: true })
+  attemptNumber?: number; // for multi-attempt questions
+
+  @Column('jsonb', { nullable: true })
+  agentFeedback?: any; // agent's feedback, explanation, encouragement
+
+  @Column('text', { nullable: true })
+  strategyTip?: string; // tip given by agent
+
+  @Column('jsonb', { nullable: true })
+  answerVariants?: string[]; // accepted variants
+
+  @Column('jsonb', { nullable: true })
+  extraData?: any; // extensible for future agent/session analytics
 }

@@ -32,4 +32,22 @@ export class Session {
     cascade: true,
   })
   questions: QuestionSession[];
+
+  @Column('int', { nullable: true })
+  totalScore?: number;
+
+  @Column('int', { nullable: true })
+  totalCorrect?: number;
+
+  @Column('int', { nullable: true })
+  totalQuestions?: number;
+
+  @Column('jsonb', { nullable: true })
+  agentSummary?: any; // agent's session summary, recommendations
+
+  @Column('jsonb', { nullable: true })
+  adaptiveDifficulty?: any; // difficulty progression metadata
+
+  @Column('jsonb', { nullable: true })
+  sessionMeta?: any; // extensible for future agent/session analytics
 }

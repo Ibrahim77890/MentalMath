@@ -1,11 +1,21 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+} from '@nestjs/common';
 import { QuestionSessionsService } from './question-sessions.service';
 import { CreateQuestionSessionDto } from './dto/create-question-session.dto';
 import { UpdateQuestionSessionDto } from './dto/update-question-session.dto';
 
 @Controller('question-sessions')
 export class QuestionSessionsController {
-  constructor(private readonly questionSessionsService: QuestionSessionsService) {}
+  constructor(
+    private readonly questionSessionsService: QuestionSessionsService,
+  ) {}
 
   @Post()
   create(@Body() createQuestionSessionDto: CreateQuestionSessionDto) {
@@ -19,16 +29,19 @@ export class QuestionSessionsController {
 
   @Get(':id')
   findOne(@Param('id') id: string) {
-    return this.questionSessionsService.findOne(+id);
+    return this.questionSessionsService.findOne(id);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateQuestionSessionDto: UpdateQuestionSessionDto) {
-    return this.questionSessionsService.update(+id, updateQuestionSessionDto);
+  update(
+    @Param('id') id: string,
+    @Body() updateQuestionSessionDto: UpdateQuestionSessionDto,
+  ) {
+    return this.questionSessionsService.update(id, updateQuestionSessionDto);
   }
 
   @Delete(':id')
   remove(@Param('id') id: string) {
-    return this.questionSessionsService.remove(+id);
+    return this.questionSessionsService.remove(id);
   }
 }

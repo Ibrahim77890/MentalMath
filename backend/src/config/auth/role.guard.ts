@@ -1,7 +1,11 @@
 import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { UserRole, UserRoleWeight } from '../../users/entities/user.entity';
-import { IS_PUBLIC_KEY } from './public.decorator';
+import {
+  ALLOWED_ROLES_KEY,
+  IS_PUBLIC_KEY,
+  ONLY_ROLE_KEY,
+} from './public.decorator';
 
 @Injectable()
 export class RolesGuard implements CanActivate {
@@ -13,29 +17,40 @@ export class RolesGuard implements CanActivate {
       context.getHandler(),
       context.getClass(),
     ]);
+    if (isPublic) return true;
 
-    // Skip role check for public endpoints
-    if (isPublic) {
-      return true;
+    // Check for onlyRole
+    const onlyRole = this.reflector.getAllAndOverride<UserRole>(ONLY_ROLE_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    const { user } = context.switchToHttp().getRequest();
+    if (!user || !user.role) return false;
+
+    if (onlyRole) {
+      // Allow only if user's role matches exactly
+      return user.role === onlyRole;
     }
 
+    // Add this logic to your RolesGuard
+    const allowedRoles = this.reflector.getAllAndOverride<UserRole[]>(
+      ALLOWED_ROLES_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+
+    if (allowedRoles) {
+      return allowedRoles.includes(user.role);
+    }
+
+    // Check for minimumRole
     const minimumRole = this.reflector.getAllAndOverride<UserRole>(
       'minimumRole',
       [context.getHandler(), context.getClass()],
     );
-
-    // If no minimum role specified and not public, allow by default
-    if (!minimumRole) {
-      return true;
-    }
-
-    const { user } = context.switchToHttp().getRequest();
-    if (!user || !user.role) return false;
+    if (!minimumRole) return true;
 
     const userRoleWeight = UserRoleWeight[user.role];
     const minimumRoleWeight = UserRoleWeight[minimumRole];
-
-    // User can access if their role weight is >= the minimum required
     return userRoleWeight >= minimumRoleWeight;
   }
 }

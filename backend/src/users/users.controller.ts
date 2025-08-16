@@ -11,7 +11,6 @@ import {
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-// import { AuthGuard } from '@nestjs/passport';
 import { LoginUserDto } from './dto/login-user.dto';
 import { MinimumRole, Public } from '@/config/auth/public.decorator';
 import { JwtAuthGuard } from '@/config/auth/jwt-auth.guard';

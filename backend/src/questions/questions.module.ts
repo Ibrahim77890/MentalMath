@@ -4,6 +4,7 @@ import { QuestionsController } from './questions.controller';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Question, QuestionSchema } from './entities/question.entity';
 import { Topic, TopicSchema } from './entities/topic.entity';
+import { TopicsService } from './topics.service';
 
 @Module({
   imports: [
@@ -13,6 +14,6 @@ import { Topic, TopicSchema } from './entities/topic.entity';
     ]),
   ],
   controllers: [QuestionsController],
-  providers: [QuestionsService],
+  providers: [QuestionsService, TopicsService],
 })
 export class QuestionsModule {}
