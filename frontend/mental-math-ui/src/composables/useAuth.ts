@@ -1,83 +1,63 @@
-import { ref, computed, onMounted } from 'vue';
-import { useRouter } from 'vue-router';
-import { useAuthStore } from 'src/stores/auth';
-import type { LoginCredentials, RegisterData } from 'src/services/auth.service';
+import { ref } from 'vue'
+import type { User } from '../apis/authentication';
+import { AuthenticationAPI } from '../apis/authentication'
+
+const user = ref<User | null>(null)
+const token = ref<string | null>(localStorage.getItem('token'))
+const loading = ref(false)
+const error = ref<string | null>(null)
 
 export function useAuth() {
-  const authStore = useAuthStore();
-  const router = useRouter();
-  
-  const isLoading = computed(() => authStore.loading);
-  const isAuthenticated = computed(() => authStore.isAuthenticated);
-  const user = computed(() => authStore.user);
-  const error = computed(() => authStore.error);
-  
-  const returnUrl = ref<string | null>(null);
-  
-  onMounted(() => {
-    // Capture return URL from route query if available
-    const urlParams = new URLSearchParams(window.location.search);
-    returnUrl.value = urlParams.get('returnUrl');
-  });
-
-  /**
-   * Login user with credentials
-   */
-  async function login(credentials: LoginCredentials) {
+  async function login(email: string, password: string) {
+    loading.value = true
+    error.value = null
     try {
-      await authStore.login(credentials);
-      await navigateAfterAuth();
-      return true;
-    } catch (err) {
-      return false;
+      const res = await AuthenticationAPI.login(email, password)
+      console.log(res);
+      if (res.success) {
+        user.value = res.data.user
+        token.value = res.data.accessToken
+        localStorage.setItem('token', token.value)
+      } else {
+        error.value = res.message || 'Login failed'
+      }
+    } catch (err: any) {
+      error.value = err.message
+    } finally {
+      loading.value = false
     }
   }
 
-  /**
-   * Register a new user
-   */
-  async function register(data: RegisterData) {
+  async function register(fullName: string, age: number, email: string, password: string) {
+    loading.value = true
+    error.value = null
     try {
-      await authStore.register(data);
-      await navigateAfterAuth();
-      return true;
-    } catch (err) {
-      return false;
+      const res = await AuthenticationAPI.register(fullName, age, email, password)
+      if (res.success) {
+        user.value = res.data.user
+        token.value = res.data.accessToken || ''
+        localStorage.setItem('token', token.value)
+      } else {
+        error.value = res.message || 'Registration failed'
+      }
+    } catch (err: any) {
+      error.value = err.message
+    } finally {
+      loading.value = false
     }
   }
 
-  /**
-   * Logout the current user
-   */
-  async function logout() {
-    await authStore.logout();
-    await router.push('/login');
+  function logout() {
+    user.value = null
+    token.value = null
+    localStorage.removeItem('token')
   }
 
-  /**
-   * Check if user is authenticated
-   */
-  async function checkAuth() {
-    return await authStore.checkAuth();
+  async function fetchCurrentUser() {
+    if (!token.value) return
+    const res = await AuthenticationAPI.getCurrentUserDetails(token.value)
+    if (res.success) user.value = res.data
   }
 
-  /**
-   * Navigate after successful authentication
-   */
-  async function navigateAfterAuth() {
-    // Navigate to return URL or default route
-    const targetPath = returnUrl.value || '/dashboard';
-    await router.push(targetPath);
-  }
-
-  return {
-    login,
-    register,
-    logout,
-    checkAuth,
-    isAuthenticated,
-    isLoading,
-    user,
-    error
-  };
+  return { user, token, loading, error, login, register, logout, fetchCurrentUser }
 }

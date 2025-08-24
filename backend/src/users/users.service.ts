@@ -83,19 +83,36 @@ export class UsersService {
       role: user.role, // Include role in JWT payload
     };
 
-    return {
-      accessToken: this.jwtService.sign(payload),
-      user: {
-        id: user.id,
-        email: user.email,
-        fullName: user.fullName,
-        role: user.role, // Include role in response
+    const returningPayload = {
+      success: true,
+      data: {
+        accessToken: this.jwtService.sign(payload),
+        user: {
+          id: user.id,
+          email: user.email,
+          fullName: user.fullName,
+          role: user.role, // Include role in response
+        },
       },
     };
+
+    return returningPayload;
   }
 
   findAll() {
     return this.usersRepository.find();
+  }
+
+  async findMe(userPayload: any) {
+    const user = await this.usersRepository.findOne({
+      where: { id: userPayload.sub },
+    });
+    if (!user) {
+      throw new NotFoundException(`User not found`);
+    }
+    // Remove password from response
+    const { password, ...result } = user;
+    return result;
   }
 
   async findOne(id: number) {

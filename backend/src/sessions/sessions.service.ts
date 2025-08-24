@@ -17,6 +17,7 @@ import {
   QuestionDocument,
 } from '@/questions/entities/question.entity';
 import axios from 'axios';
+import { QuestionSession } from '@/question-sessions/entities/question-session.entity';
 
 @Injectable()
 export class SessionsService {
@@ -30,6 +31,8 @@ export class SessionsService {
     @InjectModel(Question.name)
     private readonly questionModel: Model<QuestionDocument>,
   ) {}
+
+  // ...existing code...
 
   async create(createSessionDto: CreateSessionDto, userPayload: any) {
     // Find the user by ID
@@ -63,7 +66,8 @@ export class SessionsService {
     if (topicSlugs.length > 0) {
       initialQuestion = await this.questionModel
         .findOne({ topic: topicSlugs[0] })
-        .sort({ difficulty: 1 }) // Assuming lower difficulty means simpler
+        .sort({ difficulty: 1 })
+        .lean()
         .exec();
     }
 
@@ -71,25 +75,68 @@ export class SessionsService {
     const currentTime = new Date();
     const oneHourLater = new Date(currentTime.getTime() + 60 * 60 * 1000);
 
+    // Prepare initial QuestionSession entity
+    let initialQuestionSession: QuestionSession | null = null;
+    if (initialQuestion) {
+      initialQuestionSession = this.sessionRepository.manager.create(
+        QuestionSession,
+        {
+          questionId: (initialQuestion._id as any).toString(),
+          response: '',
+          correct: false,
+          timeTaken: 0,
+          timestamp: currentTime,
+          // session will be set after session is created
+        },
+      );
+      // Save the QuestionSession entity
+      initialQuestionSession = await this.sessionRepository.manager.save(
+        initialQuestionSession,
+      );
+    }
+
+    // Create the session entity and assign the QuestionSession
     const session = this.sessionRepository.create({
       user,
       topicOrder: createSessionDto.topicOrder,
       startTime: currentTime,
       endTime: oneHourLater,
-      questions: initialQuestion
-        ? [
-            {
-              questionId: (initialQuestion._id as any).toString(),
-              response: '', // <-- Provide default empty response
-              correct: false, // <-- Provide default value
-              timeTaken: 0, // <-- Provide default value
-            },
-          ]
-        : [],
+      questions: initialQuestionSession ? [initialQuestionSession] : [],
     });
 
     // Save the session
-    return await this.sessionRepository.save(session);
+    const newSession = await this.sessionRepository.save(session);
+
+    // Populate question details for all QuestionSession entries before returning
+    const populatedQuestions = await Promise.all(
+      (newSession.questions || []).map(async (qs: any) => {
+        let questionData = initialQuestion;
+        if (!questionData && qs.questionId) {
+          questionData = await this.questionModel
+            .findById(qs.questionId)
+            .lean()
+            .exec();
+        }
+        return {
+          ...qs,
+          question: questionData || null,
+        };
+      }),
+    );
+
+    // Build the response object matching your frontend interface
+    const responseSession = {
+      ...newSession,
+      questions: populatedQuestions,
+      user: {
+        id: user.id,
+        fullName: user.fullName,
+        email: user.email,
+        role: user.role,
+      },
+    };
+
+    return { data: responseSession, success: true };
   }
 
   async findAll() {
@@ -138,7 +185,8 @@ export class SessionsService {
     }
 
     // Get the current question session (first in array)
-    const currentQuestionSession = session.questions?.[0];
+    const currentQuestionSession =
+      session.questions?.[session.questions?.length - 1];
     let questionDetails: any = null;
 
     if (currentQuestionSession && currentQuestionSession.questionId) {
@@ -150,9 +198,12 @@ export class SessionsService {
     }
 
     return {
-      session,
-      currentQuestionSession,
-      currentQuestion: questionDetails,
+      success: true,
+      data: {
+        session,
+        currentQuestionSession,
+        currentQuestion: questionDetails,
+      },
     };
   }
 
@@ -197,45 +248,188 @@ export class SessionsService {
     await this.sessionRepository.save(session);
 
     // If answered correctly, call agent for next question suggestion
-    let nextQuestion: QuestionDocument | null = null;
+    const nextQuestion: QuestionDocument | null = null;
     if (currentQuestionSession.correct) {
       // Prepare payload for agent
       const agentPayload = {
+        questionId: questionDetails._id, // MongoDB question ID
         topic: questionDetails.topic,
-        previousQuestionId: questionDetails._id,
+        subTopic: questionDetails.subtopic,
+        difficulty: questionDetails.difficulty,
+        wasCorrect: currentQuestionSession.correct,
+        timeTaken: answerDto.timeTaken,
         estimatedTime: questionDetails.estimatedTime,
-        actualTime: answerDto.timeTaken,
-        userId: session.user.id,
+        answer: answerDto.response,
         sessionId: session.id,
+        userId: session.user.id,
       };
 
       // Call agent API (adjust URL and payload as needed)
       const agentResponse = await axios.post(
-        'http://localhost:5000/next-question',
+        'http://localhost:8001/agent/suggest-next-question-final',
         agentPayload,
       );
-      nextQuestion = agentResponse.data?.question as QuestionDocument;
 
-      // Optionally, add the next question to the session
-      if (nextQuestion && nextQuestion._id) {
-        session.questions.push({
-          // eslint-disable-next-line @typescript-eslint/no-base-to-string
-          questionId: nextQuestion._id.toString(),
-          response: '',
-          correct: false,
-          timeTaken: 0,
-          id: '',
-          session: new Session(),
-          timestamp: new Date(),
-        });
-        await this.sessionRepository.save(session);
+      console.log('[postCurrentQuestionAnswer] agent response:', agentResponse);
+
+      // Fetch the next question details from MongoDB using nextQuestionId
+      let nextQuestion: QuestionDocument | null = null;
+      if (agentResponse.data?.nextQuestionId) {
+        nextQuestion = await this.questionModel
+          .findById(agentResponse.data.nextQuestionId)
+          .lean()
+          .exec();
+
+        if (nextQuestion) {
+          // Create a new QuestionSession entity
+          const newQuestionSession = this.sessionRepository.manager.create(
+            QuestionSession,
+            {
+              questionId: agentResponse.data.nextQuestionId,
+              response: '',
+              correct: false,
+              timeTaken: 0,
+              timestamp: new Date(),
+            },
+          );
+
+          // Save the QuestionSession entity
+          const savedQuestionSession =
+            await this.sessionRepository.manager.save(
+              QuestionSession,
+              newQuestionSession,
+            );
+
+          // Add the saved QuestionSession to the session
+          session.questions.push(savedQuestionSession);
+          await this.sessionRepository.save(session);
+
+          // Add the full question details to the response
+          const questionWithStrategy = {
+            ...nextQuestion,
+            strategyTip: agentResponse.data.strategyTip,
+          };
+          nextQuestion = questionWithStrategy as unknown as QuestionDocument;
+        }
       }
+
+      return {
+        success: true,
+        data: {
+          session,
+          currentQuestionSession,
+          nextQuestion,
+          agentMessage: agentResponse.data.message,
+          strategyTip: agentResponse.data.strategyTip,
+          reflectionPrompt: agentResponse.data.reflectionPrompt,
+        },
+      };
+    }
+  }
+
+  async getDashboardData(user: any, topic?: string) {
+    // Create query builder for more complex queries
+    const queryBuilder = this.sessionRepository
+      .createQueryBuilder('session')
+      .leftJoinAndSelect('session.questions', 'questions')
+      .where('session.user.id = :userId', { userId: user.userId })
+      .orderBy('session.startTime', 'DESC')
+      .take(10);
+
+    // Add topic filter if provided
+    if (topic) {
+      queryBuilder.andWhere(':topic = ANY(session.topicOrder)', { topic });
     }
 
-    return {
-      session,
-      currentQuestionSession,
-      nextQuestion,
+    // Fetch sessions for the user and topic
+    const sessions = await queryBuilder.getMany();
+
+    // Calculate stats
+    let accuracy: number | null = null;
+    let avgTime: number | null = null;
+    let recent: any[] = [];
+    let chart: any = null;
+
+    if (sessions.length) {
+      let totalQuestions = 0;
+      let correctAnswers = 0;
+      let totalTime = 0;
+      const labels: string[] = [];
+      const accuracyData: number[] = [];
+      const timeData: number[] = [];
+
+      sessions.forEach((session, idx) => {
+        const sessionQuestions = session.questions || [];
+        const sessionCorrect = sessionQuestions.filter((q) => q.correct).length;
+        const sessionTotal = sessionQuestions.length;
+        const sessionTime = sessionQuestions.reduce(
+          (sum, q) => sum + (q.timeTaken || 0),
+          0,
+        );
+
+        totalQuestions += sessionTotal;
+        correctAnswers += sessionCorrect;
+        totalTime += sessionTime;
+
+        labels.push(`Session ${idx + 1}`);
+        accuracyData.push(
+          sessionTotal ? Math.round((sessionCorrect / sessionTotal) * 100) : 0,
+        );
+        timeData.push(
+          sessionTotal ? Math.round(sessionTime / sessionTotal) : 0,
+        );
+
+        recent.push({
+          id: session.id,
+          startTime: session.startTime,
+          topicOrder: session.topicOrder,
+          accuracy: accuracyData[accuracyData.length - 1],
+          duration: Math.round(
+            (new Date(session.endTime).getTime() -
+              new Date(session.startTime).getTime()) /
+              60000,
+          ),
+        });
+      });
+
+      accuracy = totalQuestions
+        ? Math.round((correctAnswers / totalQuestions) * 100)
+        : 0;
+      avgTime = totalQuestions ? Math.round(totalTime / totalQuestions) : 0;
+      chart = { labels, accuracyData, timeData };
+    } else {
+      // Dummy data if no sessions found
+      accuracy = 75;
+      avgTime = 42;
+      recent = [
+        {
+          id: 'dummy1',
+          startTime: new Date().toISOString(),
+          topicOrder: [topic || 'Arithmetic'],
+          accuracy: 80,
+          duration: 60,
+        },
+        {
+          id: 'dummy2',
+          startTime: new Date(Date.now() - 86400000).toISOString(),
+          topicOrder: [topic || 'Algebra'],
+          accuracy: 70,
+          duration: 55,
+        },
+      ];
+      chart = {
+        labels: ['Session 1', 'Session 2', 'Session 3', 'Session 4'],
+        accuracyData: [70, 80, 85, 88],
+        timeData: [45, 40, 38, 36],
+      };
+    }
+
+    const returningData = {
+      stats: { accuracy, avgTime },
+      recent,
+      chart,
     };
+
+    return returningData;
   }
 }

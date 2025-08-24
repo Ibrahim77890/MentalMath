@@ -12,7 +12,7 @@ import {
 import { SessionsService } from './sessions.service';
 import { CreateSessionDto } from './dto/create-session.dto';
 import { UpdateSessionDto } from './dto/update-session.dto';
-import { AllowedRoles } from '@/config/auth/public.decorator';
+import { AllowedRoles, Public } from '@/config/auth/public.decorator';
 import { UserRole } from '@/users/entities/user.entity';
 import { JwtAuthGuard } from '@/config/auth/jwt-auth.guard';
 import { RolesGuard } from '@/config/auth/role.guard';
@@ -33,6 +33,12 @@ export class SessionsController {
     return this.sessionsService.findAll();
   }
 
+  @Get('dashboard')
+  async getDashboard(@Request() req, @Body('topic') topic?: string) {
+    return await this.sessionsService.getDashboardData(req.user, topic);
+  }
+
+  @Public()
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.sessionsService.findOne(id);
@@ -48,11 +54,14 @@ export class SessionsController {
     return this.sessionsService.remove(id);
   }
 
+  @Public()
+  @AllowedRoles(UserRole.TEACHER, UserRole.GUEST, UserRole.USER)
   @Get('current-session-question/:id')
   async findOneUserQuestionPopulated(@Param('id') id: string) {
     return await this.sessionsService.findOneUserQuestionPopulated(id);
   }
 
+  @Public()
   @Post('answer-current-session-question')
   async postCurrentQuestionAnswer(
     @Body() body: { sessionId: string; response: string; timeTaken: number },

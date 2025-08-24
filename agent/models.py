@@ -15,6 +15,7 @@ class StartSessionResponse(BaseModel):
     startedAt: datetime
 
 class AnswerEvent(BaseModel):
+    userId: str
     sessionId: str
     questionId: str
     topic: str

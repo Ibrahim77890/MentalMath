@@ -6,7 +6,6 @@
         subtitle="Sign up for Mental Math"
       >
         <c-form
-          :loading="isLoading"
           :error="formError"
           submit-label="Sign Up"
           @submit="handleSubmit"
@@ -39,6 +38,19 @@
             :rules="[val => !!val || 'Password is required']"
             placeholder="Create a password"
           />
+
+          <c-input
+            v-model="form.age"
+            label="Age"
+            type="number"
+            :rules="[
+              val => !!val || 'Age is required',
+              val => Number(val) > 0 || 'Please enter a valid age',
+              val => Number(val) >= 18 || 'You must be at least 18 years old'
+            ]"
+            placeholder="Enter your age"
+            class="q-mb-md"
+          />
         </c-form>
         
         <template #footer>
@@ -61,21 +73,23 @@ import AuthLayout from 'src/layouts/AuthLayout.vue';
 import CForm from 'src/components/form/CForm.vue';
 import CInput from 'src/components/form/CInput.vue';
 
-const { register, isLoading, error } = useAuth();
+const { register, error } = useAuth();
 
 const form = ref({
   fullName: '',
   email: '',
   password: '',
+  age: null,
 });
 
 const formError = computed(() => error.value);
 
 async function handleSubmit() {
-  await register({
-    fullName: form.value.fullName,
-    email: form.value.email,
-    password: form.value.password,
-  });
+  await register(
+    form.value.fullName,
+    form.value.age || 1,
+    form.value.email,
+    form.value.password
+  );
 }
 </script>

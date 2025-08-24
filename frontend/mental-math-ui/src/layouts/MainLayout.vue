@@ -84,7 +84,7 @@ async function goToProfile() {
   await router.push('/profile');
 }
 
-async function handleLogout() {
-  await logout();
+function handleLogout() {
+  logout();
 }
 </script>

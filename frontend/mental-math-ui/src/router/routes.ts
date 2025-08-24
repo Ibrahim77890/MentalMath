@@ -42,12 +42,14 @@ const routes: RouteRecordRaw[] = [
     ]
   },
   {
-    path: '/session',
-    component: () => import('layouts/SessionLayout.vue'),
-    meta: { requiresAuth: true },
-    props: { totalQuestions: 10, timePerQuestion: 30 },
-    children: [
-      { path: '', name: 'practice', component: () => import('pages/SessionPage.vue') }
+  path: '/session/:sessionId',
+  component: () => import('layouts/SessionLayout.vue'),
+  children: [
+      {
+        path: '', // This matches /session/:sessionId exactly
+        name: 'Session',
+        component: () => import('pages/SessionPage.vue')
+      }
     ]
   },
   {

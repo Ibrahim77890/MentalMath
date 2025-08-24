@@ -1,5 +1,5 @@
 <template>
-  <q-layout view="hHh lpR fFf">
+  <q-layout view="hHh lpR fFf" class="dashboard-layout">
     <!-- Header -->
     <q-header elevated>
       <q-toolbar>
@@ -58,18 +58,21 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
-import { useAuthStore } from 'src/stores/auth'; // Adjust path as needed
+import { useAuth } from 'src/composables/useAuth';
 
 const drawer = ref<boolean>(true);
 const router = useRouter();
-const authStore = useAuthStore();
+const { user, fetchCurrentUser, logout } = useAuth();
 
-// User information (replace with actual data from your auth store)
-const userName = ref('John Doe');
-const userRole = ref('Student');
-const userAvatar = ref('https://cdn.quasar.dev/img/avatar.png'); // Default avatar or use user's photo
+const userName = computed(() => user.value?.fullName || 'Guest');
+const userRole = computed(() => user.value?.role || 'Student');
+const userAvatar = ref('https://cdn.quasar.dev/img/avatar.png'); // Default avatar
+
+onMounted(async () => {
+  await fetchCurrentUser();
+});
 
 async function navigate(path: string): Promise<void> {
   await router.push(path);
@@ -83,9 +86,9 @@ function goToSettings(): void {
   // router.push('/settings');
 }
 
-async function logout(): Promise<void> {
+async function handleLogout(): Promise<void> {
   try {
-    await authStore.logout();
+    logout();
     await router.push('/login');
   } catch (error) {
     console.error('Logout failed', error);
@@ -94,5 +97,17 @@ async function logout(): Promise<void> {
 </script>
 
 <style scoped>
-/* Add custom styles here */
+.dashboard-layout {
+  background: #020202;
+}
+
+:deep(.q-header) {
+  background: rgba(2, 2, 2, 0.8);
+  backdrop-filter: blur(10px);
+}
+
+:deep(.q-footer) {
+  background: rgba(2, 2, 2, 0.8);
+  backdrop-filter: blur(10px);
+}
 </style>

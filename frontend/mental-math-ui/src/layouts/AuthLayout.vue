@@ -1,20 +1,19 @@
 <template>
   <q-layout view="lHh Lpr lFf">
-    <q-page-container>
-      <div class="auth-container">
+    <q-page-container class="">
+      <div class="auth-container auth-page-container" style="background: url('/wallpaper-landing-page (2).jpg') center center / cover no-repeat;">
         <q-card class="auth-card">
 
           <q-card-section class="auth-card-header">
-            <h1 class="text-h5 q-my-none">{{ title }}</h1>
-            <p v-if="subtitle" class="text-body2 q-mt-sm q-mb-none text-grey-7">{{ subtitle }}</p>
+            <h1 class="text-h4 text-white">{{ title }}</h1>
+            <p v-if="subtitle" class="text-body2 q-mt-sm q-mb-none">{{ subtitle }}</p>
           </q-card-section>
 
           <div class="auth-card-content">
             <!-- Use either slot or router-view, not both -->
-            <slot>
               <!-- If no slot content is provided, use router-view -->
+              <slot></slot>
               <router-view />
-            </slot>
           </div>
 
           <q-separator v-if="$slots.footer" />
