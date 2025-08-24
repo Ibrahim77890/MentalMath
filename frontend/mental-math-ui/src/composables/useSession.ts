@@ -1,10 +1,11 @@
 import { ref } from 'vue'
-import type { Session, CurrentSessionQuestionResponse } from '../apis/session';
+import type { Session, CurrentSessionQuestionResponse, AgentReflection } from '../apis/session';
 import { SessionAPI } from '../apis/session'
 import { useAuth } from './useAuth'
 
 const currentSession = ref<Session | null>(null)
 const currentQuestion = ref<CurrentSessionQuestionResponse | null>(null)
+const currentAgentReflection = ref<AgentReflection | null>(null);
 const loading = ref(false)
 const error = ref<string | null>(null)
 
@@ -49,6 +50,8 @@ export function useSession() {
     
     if (res.success) {
       currentQuestion.value = res.data
+      currentAgentReflection.value = 
+        res.data.previousQuestionAgenticPromptReflection || null;
     }
   }
 

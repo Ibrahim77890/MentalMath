@@ -58,10 +58,24 @@ export interface Question {
 }
 
 // Response for current session question
+export interface AgentReflection {
+  trace: {
+    mastery: number;
+    prompt?: string;
+    llm_response?: string;
+  };
+  mastery: number;
+  reason: 'remedial' | 'progress';
+  llmResponse: string | null;
+  prompt: string | null;
+}
+
+// Update the CurrentSessionQuestionResponse interface
 export interface CurrentSessionQuestionResponse {
   session: Session;
   currentQuestionSession: QuestionSession;
   currentQuestion: Question;
+  previousQuestionAgenticPromptReflection: AgentReflection | '';
 }
 
 const API_BASE_URL = process.env.API_URL || 'http://localhost:3000';

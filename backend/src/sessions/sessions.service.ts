@@ -18,12 +18,15 @@ import {
 } from '@/questions/entities/question.entity';
 import axios from 'axios';
 import { QuestionSession } from '@/question-sessions/entities/question-session.entity';
+import { AgentDecision } from './entities/agent-decision.entity';
 
 @Injectable()
 export class SessionsService {
   constructor(
     @InjectRepository(Session)
     private readonly sessionRepository: Repository<Session>,
+    @InjectRepository(AgentDecision)
+    private readonly agentDecisionRepository: Repository<AgentDecision>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     @InjectModel(Topic.name)
@@ -184,10 +187,11 @@ export class SessionsService {
       throw new NotFoundException(`Session with id ${sessionId} not found`);
     }
 
-    // Get the current question session (first in array)
+    // Get the current question session (last in array)
     const currentQuestionSession =
       session.questions?.[session.questions?.length - 1];
     let questionDetails: any = null;
+    let previousAgentDecision: AgentDecision | null = null;
 
     if (currentQuestionSession && currentQuestionSession.questionId) {
       // Fetch the question details from MongoDB
@@ -195,7 +199,33 @@ export class SessionsService {
         .findById(currentQuestionSession.questionId)
         .lean()
         .exec();
+
+      // Get the last agent decision for this session where this was the next_question_id
+      try {
+        // Use TypeORM query builder to get the latest agent_decision
+        previousAgentDecision = await this.agentDecisionRepository.findOne({
+          where: {
+            session_id: sessionId,
+            next_question_id: currentQuestionSession.questionId,
+          },
+          order: { created_at: 'DESC' },
+          select: ['trace', 'mastery', 'reason'],
+        });
+      } catch (error) {
+        console.error('Error fetching agent decision:', error);
+      }
     }
+
+    // Format the agent decision trace
+    const agentReflection = previousAgentDecision
+      ? {
+          trace: previousAgentDecision.trace,
+          mastery: previousAgentDecision.mastery,
+          reason: previousAgentDecision.reason,
+          llmResponse: previousAgentDecision.trace?.llm_response || null,
+          prompt: previousAgentDecision.trace?.prompt || null,
+        }
+      : '';
 
     return {
       success: true,
@@ -203,6 +233,7 @@ export class SessionsService {
         session,
         currentQuestionSession,
         currentQuestion: questionDetails,
+        previousQuestionAgenticPromptReflection: agentReflection,
       },
     };
   }

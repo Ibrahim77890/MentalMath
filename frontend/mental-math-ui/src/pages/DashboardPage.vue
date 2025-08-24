@@ -56,19 +56,6 @@
           </div>
         </div>
 
-        <div class="col-12 q-mb-md">
-          <q-btn
-            :color="useSampleData ? 'warning' : 'primary'"
-            :label="useSampleData ? 'Using Sample Data' : 'Using Real Data'"
-            @click="toggleDataSource"
-            class="q-mb-sm"
-            :icon="useSampleData ? 'model_training' : 'cloud'"
-          />
-          <div class="text-caption" v-if="useSampleData">
-            Currently showing demo data. Toggle to fetch real data from API.
-          </div>
-        </div>
-
         <q-separator />
 
         <!-- Stats summary -->
@@ -128,7 +115,7 @@
 
     <!-- Instructions dialog -->
     <q-dialog v-model="instructionsOpen" persistent>
-      <q-card style="min-width: 420px; max-width: 720px; color: white">
+      <q-card style="min-width: 420px; max-width: 720px; color: white; background: black;">
         <q-card-section>
           <div class="text-h6">Exam Instructions — {{ selectedTopic }}</div>
           <div class="text-caption q-mt-sm">
@@ -249,6 +236,11 @@ const SAMPLE_DATA = {
   }
 };
 
+// Computed property for authentication status
+const isAuthenticated = computed(() => {
+  return !!localStorage.getItem('token');
+});
+
 // helpers
 function formatDate(dateStr: string): string {
   const d = new Date(dateStr);
@@ -272,10 +264,7 @@ function renderAccuracyChart(topic: string) {
           data: d.accuracy,
           fill: false,
           tension: 0.3,
-          borderWidth: 2,
-          borderColor: '#42A5F5',
-          backgroundColor: '#42A5F5',
-          pointBackgroundColor: '#42A5F5'
+          borderWidth: 2
         }
       ]
     },
@@ -286,27 +275,11 @@ function renderAccuracyChart(topic: string) {
         y: {
           min: 0,
           max: 100,
-          ticks: { 
-            stepSize: 10,
-            color: 'rgba(255, 255, 255, 0.7)'
-          },
-          grid: {
-            color: 'rgba(255, 255, 255, 0.1)'
-          }
-        },
-        x: {
-          ticks: {
-            color: 'rgba(255, 255, 255, 0.7)'
-          },
-          grid: {
-            color: 'rgba(255, 255, 255, 0.1)'
-          }
+          ticks: { stepSize: 10 }
         }
       },
       plugins: {
-        legend: { 
-          display: false 
-        }
+        legend: { display: false }
       }
     }
   });
@@ -318,11 +291,12 @@ function renderTimeChart() {
     timeChart.destroy();
     timeChart = null;
   }
-  
+  // build per-topic average time across topicOptions
   const labels = topicOptions.value.slice();
   const data = labels.map(t => {
     const entry = topicProgress.value[t];
     if (!entry) return 0;
+    // take last avgTime if available
     const arr = entry.avgTime;
     return arr && arr.length ? arr[arr.length - 1] : 0;
   });
@@ -330,14 +304,12 @@ function renderTimeChart() {
   timeChart = new Chart(timeCanvas.value, {
     type: 'bar',
     data: {
-      labels: labels.map(l => l.charAt(0).toUpperCase() + l.slice(1).toLowerCase()),
+      labels,
       datasets: [
         {
           label: 'Avg time (s)',
           data,
-          borderWidth: 1,
-          backgroundColor: ['#42A5F5', '#66BB6A', '#FFA726', '#EC407A'],
-          borderColor: ['#42A5F5', '#66BB6A', '#FFA726', '#EC407A']
+          borderWidth: 1
         }
       ]
     },
@@ -346,26 +318,7 @@ function renderTimeChart() {
       maintainAspectRatio: false,
       scales: {
         y: {
-          beginAtZero: true,
-          ticks: {
-            color: 'rgba(255, 255, 255, 0.7)'
-          },
-          grid: {
-            color: 'rgba(255, 255, 255, 0.1)'
-          }
-        },
-        x: {
-          ticks: {
-            color: 'rgba(255, 255, 255, 0.7)'
-          },
-          grid: {
-            color: 'rgba(255, 255, 255, 0.1)'
-          }
-        }
-      },
-      plugins: {
-        legend: {
-          display: false
+          beginAtZero: true
         }
       }
     }
@@ -395,11 +348,14 @@ function openInstructions() {
 
 // start session confirmed
 async function confirmStartSession() {
-  if (useSampleData.value) {
+  if (!isAuthenticated.value) {
     $q.dialog({
-      title: 'Sample Mode',
-      message: 'This is a demo mode. Toggle to real data to start an actual session.',
-      ok: 'Got it'
+      title: 'Sign in Required',
+      message: 'Please sign in to start a session and save your progress.',
+      ok: 'Sign in',
+      cancel: true
+    }).onOk(() => {
+      void router.push('/login');
     });
     return;
   }
@@ -422,47 +378,16 @@ function viewSession(id: string) {
   // router.push({ name: 'SessionDetail', params: { id } });
 }
 
-// Sample data
-const useSampleData = ref(true);
-
-async function toggleDataSource() {
-  useSampleData.value = !useSampleData.value;
-  if (useSampleData.value) {
-    // Load sample data
+// lifecycle
+onMounted(async () => {
+  if (!isAuthenticated.value) {
+    // Use sample data
     stats.value = SAMPLE_DATA.stats;
     recentSessions.value = SAMPLE_DATA.recentSessions;
     topicProgress.value = SAMPLE_DATA.topicProgress;
     user.value = SAMPLE_DATA.user;
   } else {
     // Fetch real data
-    try {
-      for (const t of topicOptions.value) {
-        if (!topicProgress.value[t]) {
-          topicProgress.value[t] = { labels: [], accuracy: [], avgTime: [] };
-        }
-        await fetchDashboardForTopic(t);
-      }
-    } catch (error) {
-      console.error('Error fetching real data:', error);
-      $q.notify({
-        type: 'negative',
-        message: 'Failed to fetch real data. Reverting to sample data.',
-        position: 'top'
-      });
-      useSampleData.value = true;
-    }
-  }
-  await refreshAllForTopic(selectedTopic.value);
-}
-
-// lifecycle
-onMounted(async () => {
-  if (useSampleData.value) {
-    stats.value = SAMPLE_DATA.stats;
-    recentSessions.value = SAMPLE_DATA.recentSessions;
-    topicProgress.value = SAMPLE_DATA.topicProgress;
-    user.value = SAMPLE_DATA.user;
-  } else {
     for (const t of topicOptions.value) {
       if (!topicProgress.value[t]) {
         topicProgress.value[t] = { labels: [], accuracy: [], avgTime: [] };
@@ -475,6 +400,17 @@ onMounted(async () => {
 
 watch(selectedTopic, async (newTopic) => {
   await refreshAllForTopic(newTopic);
+});
+
+// watch effect for authentication changes
+watch(isAuthenticated, (newValue) => {
+  if (!newValue) {
+    // Reset to sample data if logged out
+    stats.value = SAMPLE_DATA.stats;
+    recentSessions.value = SAMPLE_DATA.recentSessions;
+    topicProgress.value = SAMPLE_DATA.topicProgress;
+    user.value = SAMPLE_DATA.user;
+  }
 });
 
 onBeforeUnmount(() => {
@@ -524,25 +460,9 @@ onBeforeUnmount(() => {
   color: white;
 }
 
-
-
 .chart-container {
   height: 320px;
   position: relative;
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 8px;
-  padding: 16px;
-}
-
-.chart-container canvas {
-  width: 100% !important;
-  height: 100% !important;
-}
-
-/* Add this new style for chart cards */
-:deep(.q-card) .chart-container {
-  background: rgba(0, 0, 0, 0.2);
-  backdrop-filter: blur(8px);
 }
 
 .topic-list-container .scroll {

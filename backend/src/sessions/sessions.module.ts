@@ -8,10 +8,11 @@ import { User } from '@/users/entities/user.entity';
 import { Topic, TopicSchema } from '@/questions/entities/topic.entity';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Question, QuestionSchema } from '@/questions/entities/question.entity';
+import { AgentDecision } from './entities/agent-decision.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Session, User]),
+    TypeOrmModule.forFeature([Session, User, AgentDecision]),
     forwardRef(() => UsersModule),
     MongooseModule.forFeature([
       { name: Question.name, schema: QuestionSchema },
